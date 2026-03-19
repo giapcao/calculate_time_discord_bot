@@ -2,7 +2,7 @@ import asyncio
 import os
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 import discord
@@ -22,10 +22,46 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+VN_TZ = timezone(timedelta(hours=7), name="Asia/Ho_Chi_Minh")
+
+
 def format_duration(total_seconds: int) -> str:
     hours, rem = divmod(total_seconds, 3600)
     minutes, seconds = divmod(rem, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def parse_datetime_input(value: str) -> datetime:
+    text = value.strip()
+
+    iso_candidate = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(iso_candidate)
+    except ValueError:
+        parsed = None
+
+    if parsed is None:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                parsed = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+
+    if parsed is None:
+        raise ValueError("Invalid datetime format")
+
+    if parsed.tzinfo is None:
+        # User-entered naive datetime is interpreted as Vietnam time (UTC+7).
+        parsed = parsed.replace(tzinfo=VN_TZ)
+    else:
+        parsed = parsed.astimezone(VN_TZ)
+
+    return parsed.astimezone(timezone.utc)
+
+
+def to_vn_display(dt: datetime) -> str:
+    return dt.astimezone(VN_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 @dataclass
@@ -45,6 +81,18 @@ class TimeTrackerDB:
                 channel_id INTEGER NOT NULL,
                 total_seconds INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (guild_id, user_id, channel_id)
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS voice_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT NOT NULL
             )
             """
         )
@@ -107,6 +155,64 @@ class TimeTrackerDB:
         )
         return [(int(row[0]), int(row[1])) for row in cur.fetchall()]
 
+    def add_session(
+        self,
+        guild_id: int,
+        user_id: int,
+        channel_id: int,
+        started_at: datetime,
+        ended_at: datetime,
+    ) -> None:
+        if ended_at <= started_at:
+            return
+
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO voice_sessions (guild_id, user_id, channel_id, started_at, ended_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (guild_id, user_id, channel_id, started_at.isoformat(), ended_at.isoformat()),
+        )
+        self.conn.commit()
+
+    def get_user_sessions_between(
+        self,
+        guild_id: int,
+        user_id: int,
+        start_at: datetime,
+        end_at: datetime,
+        channel_id: Optional[int] = None,
+    ) -> List[Tuple[int, datetime, datetime]]:
+        base_query = (
+            """
+            SELECT channel_id, started_at, ended_at
+            FROM voice_sessions
+            WHERE guild_id = ?
+              AND user_id = ?
+              AND ended_at > ?
+              AND started_at < ?
+            """
+        )
+        params: List[object] = [guild_id, user_id, start_at.isoformat(), end_at.isoformat()]
+
+        if channel_id is not None:
+            base_query += " AND channel_id = ?"
+            params.append(channel_id)
+
+        base_query += " ORDER BY started_at ASC"
+
+        cur = self.conn.cursor()
+        cur.execute(base_query, tuple(params))
+
+        rows: List[Tuple[int, datetime, datetime]] = []
+        for raw_channel_id, raw_start, raw_end in cur.fetchall():
+            started = datetime.fromisoformat(str(raw_start)).astimezone(timezone.utc)
+            ended = datetime.fromisoformat(str(raw_end)).astimezone(timezone.utc)
+            rows.append((int(raw_channel_id), started, ended))
+
+        return rows
+
 
 intents = discord.Intents.default()
 intents.guilds = True
@@ -142,6 +248,7 @@ async def stop_tracking(member: discord.Member, channel_id: int, left_at: Option
 
         finished_at = left_at or utcnow()
         seconds = int((finished_at - existing.joined_at).total_seconds())
+        db.add_session(member.guild.id, member.id, existing.channel_id, existing.joined_at, finished_at)
         db.add_seconds(member.guild.id, member.id, existing.channel_id, seconds)
         del active_sessions[key]
 
@@ -279,6 +386,93 @@ async def voicetop(interaction: discord.Interaction, limit: app_commands.Range[i
         lines.append(f"{index}. {display_name} - **{format_duration(seconds)}**")
 
     await interaction.response.send_message("\n".join(lines))
+
+
+@tree.command(name="rangetime", description="Calculate voice time between two datetimes (Vietnam time, UTC+7).")
+@app_commands.describe(
+    start="Start datetime (VN time): YYYY-MM-DD HH:MM or ISO8601",
+    end="End datetime (VN time): YYYY-MM-DD HH:MM or ISO8601",
+    member="Optional member to inspect",
+    channel="Optional voice channel filter",
+)
+async def rangetime(
+    interaction: discord.Interaction,
+    start: str,
+    end: str,
+    member: Optional[discord.Member] = None,
+    channel: Optional[discord.VoiceChannel] = None,
+) -> None:
+    if not interaction.guild:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    try:
+        start_at = parse_datetime_input(start)
+        end_at = parse_datetime_input(end)
+    except ValueError:
+        await interaction.response.send_message(
+            "Invalid datetime format. Use `YYYY-MM-DD HH:MM` or ISO8601. Naive time is interpreted as Vietnam time (UTC+7).",
+            ephemeral=True,
+        )
+        return
+
+    if end_at <= start_at:
+        await interaction.response.send_message("`end` must be later than `start`.", ephemeral=True)
+        return
+
+    target = member or interaction.user
+    selected_channel_id = channel.id if channel else None
+
+    sessions = db.get_user_sessions_between(
+        interaction.guild.id,
+        target.id,
+        start_at,
+        end_at,
+        selected_channel_id,
+    )
+
+    totals: Dict[int, int] = {}
+    for channel_id, session_start, session_end in sessions:
+        overlap_start = max(session_start, start_at)
+        overlap_end = min(session_end, end_at)
+        overlap_seconds = int((overlap_end - overlap_start).total_seconds())
+        if overlap_seconds > 0:
+            totals[channel_id] = totals.get(channel_id, 0) + overlap_seconds
+
+    key = (interaction.guild.id, target.id)
+    live_session = active_sessions.get(key)
+    if live_session and (selected_channel_id is None or live_session.channel_id == selected_channel_id):
+        live_start = max(live_session.joined_at, start_at)
+        live_end = min(utcnow(), end_at)
+        live_seconds = int((live_end - live_start).total_seconds())
+        if live_seconds > 0:
+            totals[live_session.channel_id] = totals.get(live_session.channel_id, 0) + live_seconds
+
+    if not totals:
+        await interaction.response.send_message(
+            f"No tracked voice time for {target.mention} in this range."
+        )
+        return
+
+    sorted_rows = sorted(totals.items(), key=lambda item: item[1], reverse=True)
+    total_seconds = sum(seconds for _, seconds in sorted_rows)
+
+    lines: List[str] = []
+    for channel_id, seconds in sorted_rows:
+        channel_obj = interaction.guild.get_channel(channel_id)
+        channel_name = channel_obj.mention if channel_obj else f"Deleted Channel ({channel_id})"
+        lines.append(f"{channel_name}: **{format_duration(seconds)}**")
+
+    details = "\n".join(lines[:20])
+    if len(lines) > 20:
+        details += f"\n... and {len(lines) - 20} more channels"
+
+    await interaction.response.send_message(
+        f"Voice time for {target.mention}\n"
+        f"Range (Vietnam time): `{to_vn_display(start_at)}` -> `{to_vn_display(end_at)}`\n"
+        f"Total: **{format_duration(total_seconds)}**\n\n"
+        f"{details}"
+    )
 
 
 if __name__ == "__main__":
