@@ -41,9 +41,9 @@ jobs:
 
             sudo mkdir -p "$APP_DIR"
             cd "$APP_DIR"
-            touch voice_time.db
+            sudo touch voice_time.db
 
-            cat > .env <<EOF
+            cat > sudo tee .env > /dev/null <<EOF
             DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
             EOF
 
