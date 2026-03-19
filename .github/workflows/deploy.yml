@@ -39,7 +39,7 @@ jobs:
             IMAGE="ghcr.io/${{ github.repository }}:${IMAGE_TAG}"
             IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
 
-            mkdir -p "$APP_DIR"
+            sudo mkdir -p "$APP_DIR"
             cd "$APP_DIR"
             touch voice_time.db
 
