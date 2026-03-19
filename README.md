@@ -129,7 +129,10 @@ Required GitHub repository secrets:
 - `VPS_PORT`: SSH port (usually `22`)
 - `DISCORD_TOKEN`: bot token used in production
 
-Deploy path is fixed in workflow: `/opt/discord-voice-time-bot`.
+Deploy path in workflow:
+
+- Preferred: `/opt/discord-voice-time-bot` (when sudo is available)
+- Fallback: `$HOME/discord-voice-time-bot` (when sudo is not available)
 
 Important:
 

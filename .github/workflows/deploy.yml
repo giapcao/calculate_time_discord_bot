@@ -30,20 +30,31 @@ jobs:
             set -e
 
             APP_DIR="/opt/discord-voice-time-bot"
+            SUDO=""
+            if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+              SUDO="sudo"
+            else
+              APP_DIR="$HOME/discord-voice-time-bot"
+            fi
             if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
               IMAGE_TAG="${{ github.event.client_payload.image_tag }}"
             else
               IMAGE_TAG="${{ github.event.inputs.image_tag }}"
             fi
 
+            if [ -z "$IMAGE_TAG" ]; then
+              IMAGE_TAG="latest"
+            fi
+
             IMAGE="ghcr.io/${{ github.repository }}:${IMAGE_TAG}"
             IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
 
-            sudo mkdir -p "$APP_DIR"
+            $SUDO mkdir -p "$APP_DIR"
             cd "$APP_DIR"
-            sudo touch voice_time.db
+            $SUDO touch voice_time.db
+            $SUDO chown -R "$USER":"$USER" "$APP_DIR"
 
-            cat > sudo tee .env > /dev/null <<EOF
+            cat > .env <<EOF
             DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
             EOF
 
