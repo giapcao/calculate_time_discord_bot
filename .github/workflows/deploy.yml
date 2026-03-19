@@ -1,0 +1,60 @@
+name: Deploy
+
+on:
+  repository_dispatch:
+    types: [deploy]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy from GHCR (example: v1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script_stop: true
+          script: |
+            set -e
+
+            APP_DIR="/opt/discord-voice-time-bot"
+            if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+              IMAGE_TAG="${{ github.event.client_payload.image_tag }}"
+            else
+              IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+            fi
+
+            IMAGE="ghcr.io/${{ github.repository }}:${IMAGE_TAG}"
+            IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+            touch voice_time.db
+
+            cat > .env <<EOF
+            DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
+            EOF
+
+            docker pull "$IMAGE"
+
+            docker rm -f discord-voice-time-bot || true
+            docker run -d \
+              --name discord-voice-time-bot \
+              --restart unless-stopped \
+              --env-file .env \
+              -v "$APP_DIR/voice_time.db:/app/voice_time.db" \
+              "$IMAGE"
+
+            docker image prune -f
