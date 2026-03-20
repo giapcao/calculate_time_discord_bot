@@ -406,18 +406,21 @@ async def rangetime(
         await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
         return
 
+    # Acknowledge quickly to avoid Discord's 3-second interaction timeout.
+    await interaction.response.defer(thinking=True)
+
     try:
         start_at = parse_datetime_input(start)
         end_at = parse_datetime_input(end)
     except ValueError:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Invalid datetime format. Use `YYYY-MM-DD HH:MM` or ISO8601. Naive time is interpreted as Vietnam time (UTC+7).",
             ephemeral=True,
         )
         return
 
     if end_at <= start_at:
-        await interaction.response.send_message("`end` must be later than `start`.", ephemeral=True)
+        await interaction.followup.send("`end` must be later than `start`.", ephemeral=True)
         return
 
     target = member or interaction.user
@@ -449,7 +452,7 @@ async def rangetime(
             totals[live_session.channel_id] = totals.get(live_session.channel_id, 0) + live_seconds
 
     if not totals:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"No tracked voice time for {target.mention} in this range."
         )
         return
@@ -467,12 +470,27 @@ async def rangetime(
     if len(lines) > 20:
         details += f"\n... and {len(lines) - 20} more channels"
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"Voice time for {target.mention}\n"
         f"Range (Vietnam time): `{to_vn_display(start_at)}` -> `{to_vn_display(end_at)}`\n"
         f"Total: **{format_duration(total_seconds)}**\n\n"
         f"{details}"
     )
+
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+    # Ensure users see a response instead of "application did not respond" when exceptions occur.
+    print(f"[APP_COMMAND_ERROR] {error}")
+
+    message = "An unexpected error occurred while processing this command. Please try again."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.HTTPException:
+        pass
 
 
 if __name__ == "__main__":
