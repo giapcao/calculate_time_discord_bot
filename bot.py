@@ -214,6 +214,29 @@ class TimeTrackerDB:
 
         return rows
 
+    def reset_user_data(self, guild_id: int, user_id: int) -> Tuple[int, int]:
+        cur = self.conn.cursor()
+        cur.execute(
+            """
+            DELETE FROM channel_time
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (guild_id, user_id),
+        )
+        deleted_channel_rows = cur.rowcount
+
+        cur.execute(
+            """
+            DELETE FROM voice_sessions
+            WHERE guild_id = ? AND user_id = ?
+            """,
+            (guild_id, user_id),
+        )
+        deleted_session_rows = cur.rowcount
+
+        self.conn.commit()
+        return int(deleted_channel_rows), int(deleted_session_rows)
+
 
 intents = discord.Intents.default()
 intents.guilds = True
@@ -479,12 +502,39 @@ async def rangetime(
     )
 
 
+@tree.command(name="resetusertime", description="Reset all tracked voice time for a member.")
+@app_commands.describe(member="Member whose tracked voice time will be reset")
+async def resetusertime(interaction: discord.Interaction, member: discord.Member) -> None:
+    if not interaction.guild:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+
+    deleted_channel_rows, deleted_session_rows = db.reset_user_data(interaction.guild.id, member.id)
+
+    key = (interaction.guild.id, member.id)
+    async with state_lock:
+        active = active_sessions.get(key)
+        if active:
+            active_sessions[key] = ActiveSession(channel_id=active.channel_id, joined_at=utcnow())
+
+    await interaction.followup.send(
+        f"Reset completed for {member.mention}.\n"
+        f"Deleted summary rows: **{deleted_channel_rows}**\n"
+        f"Deleted session rows: **{deleted_session_rows}**\n"
+        f"If the user is currently in a voice channel, tracking now restarts from this moment.",
+        ephemeral=True,
+    )
+
+
 @tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
     # Ensure users see a response instead of "application did not respond" when exceptions occur.
     print(f"[APP_COMMAND_ERROR] {error}")
 
     message = "An unexpected error occurred while processing this command. Please try again."
+
     try:
         if interaction.response.is_done():
             await interaction.followup.send(message, ephemeral=True)

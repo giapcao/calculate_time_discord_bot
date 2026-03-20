@@ -15,6 +15,7 @@ Tracks how long users stay in voice channels, stores totals in SQLite, and repor
   - `/channeltime <channel> [member]`
   - `/voicetop [limit]`
   - `/rangetime <start> <end> [member] [channel]`
+  - `/resetusertime <member>`
 
 ## 1) Create a Discord Bot in Developer Portal
 
@@ -169,6 +170,7 @@ If the bot starts correctly, you will see a log like:
 - `/voicetop limit:20`
 - `/rangetime start:2026-03-01 00:00 end:2026-03-19 23:59`
 - `/rangetime start:2026-03-01T00:00:00Z end:2026-03-19T23:59:59Z member:@Someone`
+- `/resetusertime member:@Someone`
 
 `/rangetime` note:
 
