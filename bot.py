@@ -13,6 +13,7 @@ load_dotenv()
 
 TOKEN = (os.getenv("DISCORD_TOKEN") or "").strip().strip('"').strip("'")
 TEST_GUILD_ID = os.getenv("TEST_GUILD_ID")
+DB_PATH = os.getenv("VOICE_DB_PATH", "voice_time.db")
 
 if not TOKEN:
     raise RuntimeError("Missing DISCORD_TOKEN in .env file")
@@ -221,7 +222,7 @@ intents.members = False
 
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
-db = TimeTrackerDB()
+db = TimeTrackerDB(DB_PATH)
 active_sessions: Dict[Tuple[int, int], ActiveSession] = {}
 state_lock = asyncio.Lock()
 commands_synced = False

@@ -53,6 +53,7 @@ jobs:
             cd "$APP_DIR"
             $SUDO touch voice_time.db
             $SUDO chown -R "$USER":"$USER" "$APP_DIR"
+            $SUDO chmod 775 "$APP_DIR"
             $SUDO chmod 664 "$APP_DIR/voice_time.db"
 
             cat > .env <<EOF
@@ -66,8 +67,9 @@ jobs:
               --name discord-voice-time-bot \
               --restart unless-stopped \
               --user "$(id -u):$(id -g)" \
+              -e VOICE_DB_PATH=/data/voice_time.db \
               --env-file .env \
-              -v "$APP_DIR/voice_time.db:/app/voice_time.db" \
+              -v "$APP_DIR:/data" \
               "$IMAGE"
 
             docker image prune -f

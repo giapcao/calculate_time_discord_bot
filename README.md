@@ -79,8 +79,9 @@ Run container (use your existing `.env`, keep DB persistent in local folder):
 ```powershell
 docker run -d --name discord-voice-time-bot \
   --restart unless-stopped \
+  -e VOICE_DB_PATH=/data/voice_time.db \
   --env-file .env \
-  -v ${PWD}/voice_time.db:/app/voice_time.db \
+  -v ${PWD}:/data \
   discord-voice-time-bot
 ```
 
@@ -110,8 +111,9 @@ New-Item -ItemType File -Path .\voice_time.db -Force
 ```powershell
 docker run -d --name discord-voice-time-bot \
   --restart unless-stopped \
+  -e VOICE_DB_PATH=/data/voice_time.db \
   --env-file .env \
-  -v D:/tools/calculate_time_in_discord/voice_time.db:/app/voice_time.db \
+  -v D:/tools/calculate_time_in_discord:/data \
   discord-voice-time-bot
 ```
 
@@ -196,12 +198,13 @@ If the bot starts correctly, you will see a log like:
   - The token in `.env` is invalid/expired or not a Bot Token.
   - In Discord Developer Portal -> your app -> Bot -> **Reset Token**, then paste the new token into `.env`.
 - `sqlite3.OperationalError: attempt to write a readonly database`:
-  - Usually caused by host file permission on mounted `voice_time.db`.
+  - Usually caused by host file/folder permission on mounted SQLite path.
   - SSH to VPS and run:
 
 ```bash
 APP_DIR=/opt/discord-voice-time-bot
 sudo chown -R $USER:$USER "$APP_DIR"
+sudo chmod 775 "$APP_DIR"
 sudo chmod 664 "$APP_DIR/voice_time.db"
 docker rm -f discord-voice-time-bot || true
 ```
