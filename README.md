@@ -195,3 +195,15 @@ If the bot starts correctly, you will see a log like:
 - `Improper token has been passed` or `401 Unauthorized`:
   - The token in `.env` is invalid/expired or not a Bot Token.
   - In Discord Developer Portal -> your app -> Bot -> **Reset Token**, then paste the new token into `.env`.
+- `sqlite3.OperationalError: attempt to write a readonly database`:
+  - Usually caused by host file permission on mounted `voice_time.db`.
+  - SSH to VPS and run:
+
+```bash
+APP_DIR=/opt/discord-voice-time-bot
+sudo chown -R $USER:$USER "$APP_DIR"
+sudo chmod 664 "$APP_DIR/voice_time.db"
+docker rm -f discord-voice-time-bot || true
+```
+
+- Then rerun deploy workflow.

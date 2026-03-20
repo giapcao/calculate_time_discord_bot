@@ -53,6 +53,7 @@ jobs:
             cd "$APP_DIR"
             $SUDO touch voice_time.db
             $SUDO chown -R "$USER":"$USER" "$APP_DIR"
+            $SUDO chmod 664 "$APP_DIR/voice_time.db"
 
             cat > .env <<EOF
             DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}
@@ -64,6 +65,7 @@ jobs:
             docker run -d \
               --name discord-voice-time-bot \
               --restart unless-stopped \
+              --user "$(id -u):$(id -g)" \
               --env-file .env \
               -v "$APP_DIR/voice_time.db:/app/voice_time.db" \
               "$IMAGE"
